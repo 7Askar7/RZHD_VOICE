@@ -10,4 +10,11 @@ python-docx
 openpyxl 
 transformers
 aioboto3
-# pyannote.audio
+pyannote.audio
+pydub
+faster-whisper
+soundfile
+librosa
+torch
+transformers
+unstructured
