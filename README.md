@@ -16,7 +16,7 @@
 
 
 ## :wrench: Архитектура системы
-
+<div align="center"><img src="https://i.imgur.com/q0aWVxa.png"></div>
 
 ## :globe_with_meridians: Киллер-фичи
 
