@@ -98,6 +98,11 @@ async def delete_document(
     
     return {"detail": "Document deleted successfully"}
 
+from sqlalchemy.orm import aliased
+from sqlalchemy.orm import contains_eager
+
+th_alias = aliased(TransactionHistory)
+
 @router.get(
     "/",
     status_code=status.HTTP_200_OK,
@@ -107,17 +112,46 @@ async def get_docs_info_by_user(
     session: AsyncSession = Depends(get_session),
 ):
     user: User = await auth_manuspect_user(auth_token, session)
-    # Создаем запрос с объединением таблиц документов и транзакций
-    stmt = select(Document)\
-        .join(UsersToDocuments, Document.id == UsersToDocuments.document_id)\
-        .join(TransactionHistory, Document.id == TransactionHistory.document_id, isouter=True)\
-        .filter(UsersToDocuments.user_id == user.id)\
-        .options(joinedload(Document.transaction_history))
+    # Запрос для получения документов, связанных с пользователем
+    documents_stmt = select(Document).\
+        join(UsersToDocuments, Document.id == UsersToDocuments.document_id).\
+        filter(UsersToDocuments.user_id == user.id)
 
-    # Выполняем запрос
-    result = await session.execute(stmt)
-    documents = result.scalars().unique().all()
-    return documents
+    # Выполнение запроса для получения документов
+    document_results = await session.execute(documents_stmt)
+    documents = document_results.scalars().all()
+
+    if not documents:
+        return []
+
+    # Собираем идентификаторы документов
+    document_ids = [document.id for document in documents]
+
+    # Запрос для получения job_id для этих документов
+    transactions_stmt = select(TransactionHistory.document_id, TransactionHistory.job_id).\
+        filter(TransactionHistory.document_id.in_(document_ids))
+
+    # Выполнение запроса для получения транзакций
+    transaction_results = await session.execute(transactions_stmt)
+    transactions = transaction_results.all()
+
+    # Создаем словарь для эффективного поиска job_id по document_id
+    transaction_map = {doc_id: job_id for doc_id, job_id in transactions}
+
+    # Собираем результат для возврата
+    documents_with_jobs = [
+        {
+            **document.__dict__,
+            "job_id": transaction_map.get(document.id)
+        }
+        for document in documents
+    ]
+
+    # Убираем служебное поле _sa_instance_state
+    for document in documents_with_jobs:
+        document.pop('_sa_instance_state', None)
+
+    return documents_with_jobs
 
 @router.get(
     "/status/{doc_id}",
@@ -148,6 +182,50 @@ async def get_docs_info_by_user(
     # Получаем один документ пользователя, если такой существует
     document = result.scalars().first()
     return document
+
+
+@router.get(
+    "/verify/{doc_id}",
+    status_code=status.HTTP_200_OK,
+)
+async def verify_document(
+    any_error_verified: bool,
+    any_error_reason: str,
+    doc_id: str | None,
+    auth_token: str,
+    session: AsyncSession = Depends(get_session),
+):
+    user: User = await auth_manuspect_user(auth_token, session)
+
+    # Создаем запрос с объединением таблиц документов и транзакций
+    stmt = select(Document)\
+        .join(UsersToDocuments, Document.id == UsersToDocuments.document_id)\
+        .join(TransactionHistory, Document.id == TransactionHistory.document_id, isouter=True)\
+        .filter(
+            UsersToDocuments.user_id == user.id,
+            Document.id == doc_id,  # Добавляем условие по doc_id
+            Document.is_deleted == False,
+        )\
+        .options(joinedload(Document.transaction_history))\
+        .limit(1)  # Ограничиваем количество результатов до одного
+
+    # Выполняем запрос
+    result = await session.execute(stmt)
+
+    # Получаем один документ пользователя, если такой существует
+    document = result.scalars().first()
+
+    if document:
+        document.any_error_verified = any_error_verified
+        document.any_error_reason = any_error_reason
+        return document
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found"
+        )
+
+
 
 @router.post(
     "/", 

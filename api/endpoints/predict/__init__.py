@@ -1,3 +1,4 @@
+import json
 import uuid
 import arq.jobs
 from fastapi import Depends, APIRouter, HTTPException, status
@@ -46,7 +47,41 @@ async def get_job_result(
     res = await job.result(timeout=30)
     return res 
 
+@router.post(
+    "/transaction/{job_id}",
+    status_code=status.HTTP_200_OK,
+)
+async def update_transaction_result(
+    job_id: str,
+    json_data: str,
+    auth_token: str,
+    session: AsyncSession = Depends(get_session),
+):
+    user: User = await auth_manuspect_user(auth_token, session)
 
+    transaction = await session.execute(
+        select(TransactionHistory).filter_by(job_id=job_id)
+    )
+    transaction = transaction.scalar()
+    transaction.result = json_data
+    await session.commit()
+
+@router.get(
+    "/transaction/{job_id}",
+    status_code=status.HTTP_200_OK,
+)
+async def get_transaction_result(
+    job_id: str,
+    auth_token: str,
+    session: AsyncSession = Depends(get_session),
+):
+    user: User = await auth_manuspect_user(auth_token, session)
+
+    transaction = await session.execute(
+        select(TransactionHistory).filter_by(job_id=job_id).limit(1)
+    )
+    transaction = transaction.scalars().first()
+    await transaction
 
 
 # @router.post(
