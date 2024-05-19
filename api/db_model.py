@@ -22,6 +22,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.orm import relationship
 from fastapi_users.db import SQLAlchemyBaseUserTableUUID
 from fastapi_users import schemas
 import enum
@@ -70,6 +71,9 @@ class TransactionHistory(Base):
     )
     err_reason = Column(String(512), nullable=True)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    document_id = Column(UUID, ForeignKey("documents.id"))
+
+    document = relationship("Document", back_populates="transaction_history")
 
 
 class MLModel(Base):
@@ -96,15 +100,20 @@ class Document(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(256), nullable=False)
     is_deleted = Column(Boolean, default=False)
-    verified = Column(Boolean, default=None)
-    cancellation_reason = Column(String(512), nullable=True)
+    any_error_verified = Column(Boolean, default=None)
+    any_error_reason = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    transaction_history = relationship("TransactionHistory", back_populates="document")
+    # users_to_documents = relationship("UsersToDocuments", back_populates="document")
 
 class UsersToDocuments(Base):
     __tablename__ = 'users_to_documents'
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     user_id = Column(UUID, ForeignKey("users.id"))
     document_id = Column(UUID, ForeignKey("documents.id"))
+
+    # document = relationship("Document", back_populates="users_to_documents")
 
 class Tag(Base):
     __tablename__ = 'tags'

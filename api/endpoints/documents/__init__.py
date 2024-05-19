@@ -7,6 +7,7 @@ from api.endpoints.auth.FastAPI_users import current_active_user
 from api.endpoints.auth.manuspect_users import auth_manuspect_user
 from api.endpoints.predict.utils import validate_model_name
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 from api.Asyncrq import asyncrq
 from fastapi_limiter.depends import RateLimiter
 from worker.data_models.elderly_people import DataModel
@@ -106,10 +107,16 @@ async def get_docs_info_by_user(
     session: AsyncSession = Depends(get_session),
 ):
     user: User = await auth_manuspect_user(auth_token, session)
-    # Создаем запрос с использованием JOIN между таблицами
-    result = await session.execute(select(Document).join(UsersToDocuments, UsersToDocuments.document_id == Document.id).filter(UsersToDocuments.user_id == user.id, Document.is_deleted == False))
-    # Получение документов пользователя
-    documents = result.scalars().all()
+    # Создаем запрос с объединением таблиц документов и транзакций
+    stmt = select(Document)\
+        .join(UsersToDocuments, Document.id == UsersToDocuments.document_id)\
+        .join(TransactionHistory, Document.id == TransactionHistory.document_id, isouter=True)\
+        .filter(UsersToDocuments.user_id == user.id)\
+        .options(joinedload(Document.transaction_history))
+
+    # Выполняем запрос
+    result = await session.execute(stmt)
+    documents = result.scalars().unique().all()
     return documents
 
 @router.get(
@@ -122,18 +129,22 @@ async def get_docs_info_by_user(
     session: AsyncSession = Depends(get_session),
 ):
     user: User = await auth_manuspect_user(auth_token, session)
-    
-    # Создаем запрос с использованием JOIN между таблицами
-    result = await session.execute(
-        select(Document)
-        .join(UsersToDocuments, UsersToDocuments.document_id == Document.id)
+
+    # Создаем запрос с объединением таблиц документов и транзакций
+    stmt = select(Document)\
+        .join(UsersToDocuments, Document.id == UsersToDocuments.document_id)\
+        .join(TransactionHistory, Document.id == TransactionHistory.document_id, isouter=True)\
         .filter(
             UsersToDocuments.user_id == user.id,
             Document.id == doc_id,  # Добавляем условие по doc_id
             Document.is_deleted == False,
-        )
+        )\
+        .options(joinedload(Document.transaction_history))\
         .limit(1)  # Ограничиваем количество результатов до одного
-    )
+
+    # Выполняем запрос
+    result = await session.execute(stmt)
+
     # Получаем один документ пользователя, если такой существует
     document = result.scalars().first()
     return document
@@ -145,39 +156,34 @@ async def get_docs_info_by_user(
 )
 async def upload_document(
     auth_token: str,
-    target_class: str,
     document: UploadFile = File(description="Your document (max 10 MB)"),
     session: AsyncSession = Depends(get_session),
 ):
     user: User = await auth_manuspect_user(auth_token, session)
-
 
     doc_id = uuid.uuid4()
     await s3.upload_file(file=document.file, filename=str(doc_id))
     new_document = Document(id=doc_id, name=document.filename)
     session.add(new_document)
     
-    
     new_users_to_document = UsersToDocuments(user_id=user.id, document_id=new_document.id)
-    session.add(new_users_to_document)
-    
+    session.add(new_users_to_document)    
     await session.commit()
 
     transaction = TransactionHistory(
         job_id=uuid.uuid4(),
         user_id=user.id,
         amount=0,
+        document_id=new_document.id,
         model_id=None,
     )
-    
     session.add(transaction)
-    
     await session.commit()
+
     
     job = await asyncrq.pool.enqueue_job(
         function="analyze_document",
         _job_id=str(transaction.job_id),
-        class_name=target_class,
         doc_id=str(doc_id),
         doc_name=document.filename
     )
