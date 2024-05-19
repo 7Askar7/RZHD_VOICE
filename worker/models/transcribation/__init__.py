@@ -12,11 +12,11 @@ from pyannote.audio.pipelines.utils.hook import ProgressHook
 class ModelTranscribation:
     def __init__(
         self,
-        model_name: str = "pyannote/speaker-diarization-3.0",
-        use_auth_token="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",
+        model_name: str = "pyannote/speaker-diarization-3.1",
+        use_auth_token="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",
         device: str = "cuda",
     ):
-        self.pipeline = Pipeline.from_pretrained(model_name, use_auth_token)
+        self.pipeline = Pipeline.from_pretrained(model_name, use_auth_token=use_auth_token)
         self.transcribe_model = WhisperModel("large-v3", device="cuda")
         #self.device = device
         #self.model.to(device)
