@@ -14,7 +14,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# lib/
 lib64/
 parts/
 sdist/
@@ -164,3 +164,4 @@ postgres
 redis
 local-data
 .vscode
+frontend/build/05adc4ddcf7ebdfe8b74d00e724439ce/gen_dart_plugin_registrant.stamp
